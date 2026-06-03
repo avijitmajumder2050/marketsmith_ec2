@@ -50,12 +50,30 @@ python3 -m pip install --upgrade pip --user || true
 # ==========================================================
 # PLAYWRIGHT DEPENDENCIES
 # ==========================================================
-sudo yum install -y \
-  atk cups-libs gtk3 libXcomposite libXcursor libXdamage libXext \
-  libXi libXrandr libXScrnSaver libXtst pango alsa-lib \
-  libX11 libX11-xcb libxcb libXfixes libXrender \
-  cairo gdk-pixbuf2 fontconfig freetype
-
+yum install -y \
+atk \
+cups-libs \
+gtk3 \
+libXcomposite \
+libXcursor \
+libXdamage \
+libXext \
+libXi \
+libXrandr \
+libXrender \
+libXScrnSaver \
+libXtst \
+pango \
+alsa-lib \
+libX11 \
+libX11-xcb \
+libxcb \
+libXfixes \
+libXrender \
+cairo \
+gdk-pixbuf2 \
+fontconfig \
+freetype
 
 # ==========================================================
 # CLONE REPO
