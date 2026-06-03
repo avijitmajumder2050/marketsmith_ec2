@@ -45,7 +45,7 @@ echo "Packages installed"
 # ==========================================================
 # UPGRADE PIP
 # ==========================================================
-python3 -m pip install --upgrade pip
+python3 -m pip install --upgrade pip --user || true
 
 # ==========================================================
 # PLAYWRIGHT DEPENDENCIES
