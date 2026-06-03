@@ -8,7 +8,7 @@ REGION="ap-south-1"
 APP_USER="ec2-user"
 APP_HOME="/home/ec2-user"
 
-GITHUB_REPO="https://github.com/YOUR_USERNAME/YOUR_REPO.git"
+GITHUB_REPO="https://github.com/avijitmajumder2050/marketsmith_ec2.git"
 
 APP_NAME="marketsmithindia-bot"
 
