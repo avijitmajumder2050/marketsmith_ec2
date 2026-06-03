@@ -18,6 +18,8 @@ S3_PREFIX="trading-bot"
 LOGFILE="/var/log/${APP_NAME}.log"
 BOOTLOG="/var/log/${APP_NAME}-bootstrap.log"
 
+PLAYWRIGHT_PATH="${APP_HOME}/playwright-browsers"
+
 exec > >(tee -a ${BOOTLOG}) 2>&1
 
 echo "======================================="
@@ -27,14 +29,14 @@ echo "======================================="
 # ==========================================================
 # OS UPDATE
 # ==========================================================
-yum update -y
+sudo yum update -y
 
-timedatectl set-timezone Asia/Kolkata
+sudo timedatectl set-timezone Asia/Kolkata
 
 # ==========================================================
 # INSTALL PACKAGES
 # ==========================================================
-yum install -y \
+sudo yum install -y \
 python3 \
 python3-pip \
 git \
@@ -43,19 +45,31 @@ awscli
 echo "Packages installed"
 
 # ==========================================================
-# UPGRADE PIP
-# ==========================================================
-python3 -m pip install --upgrade pip --user || true
-
-# ==========================================================
-# PLAYWRIGHT DEPENDENCIES
+# PLAYWRIGHT LINUX DEPENDENCIES
 # ==========================================================
 sudo yum install -y \
-  atk cups-libs gtk3 libXcomposite libXcursor libXdamage libXext \
-  libXi libXrandr libXScrnSaver libXtst pango alsa-lib \
-  libX11 libX11-xcb libxcb libXfixes libXrender \
-  cairo gdk-pixbuf2 fontconfig freetype
-
+atk \
+cups-libs \
+gtk3 \
+libXcomposite \
+libXcursor \
+libXdamage \
+libXext \
+libXi \
+libXrandr \
+libXScrnSaver \
+libXtst \
+pango \
+alsa-lib \
+libX11 \
+libX11-xcb \
+libxcb \
+libXfixes \
+libXrender \
+cairo \
+gdk-pixbuf2 \
+fontconfig \
+freetype
 
 # ==========================================================
 # CLONE REPO
@@ -68,22 +82,24 @@ if [ ! -d "${REPO_NAME}" ]; then
     git clone ${GITHUB_REPO}
 fi
 
-chown -R ${APP_USER}:${APP_USER} ${REPO_NAME}
+sudo chown -R ${APP_USER}:${APP_USER} ${REPO_NAME}
 
 cd ${REPO_NAME}
 
 # ==========================================================
 # PYTHON VENV
 # ==========================================================
-python3 -m venv venv
+if [ ! -d "venv" ]; then
+    python3 -m venv venv
+fi
 
 source venv/bin/activate
 
-pip install --upgrade pip
+# ==========================================================
+# INSTALL PYTHON PACKAGES
+# ==========================================================
+pip install --upgrade setuptools wheel
 
-# ==========================================================
-# PYTHON LIBRARIES
-# ==========================================================
 pip install \
 playwright \
 requests \
@@ -92,28 +108,38 @@ boto3 \
 beautifulsoup4
 
 # ==========================================================
-# INSTALL CHROMIUM
-# ==========================================================
-python -m playwright install chromium
-
-# ==========================================================
-# REQUIREMENTS.TXT
+# INSTALL REQUIREMENTS
 # ==========================================================
 if [ -f requirements.txt ]; then
     pip install -r requirements.txt
 fi
 
 # ==========================================================
-# LOG FILE
+# INSTALL PLAYWRIGHT BROWSER
 # ==========================================================
-touch ${LOGFILE}
-chown ${APP_USER}:${APP_USER} ${LOGFILE}
-chmod 664 ${LOGFILE}
+mkdir -p ${PLAYWRIGHT_PATH}
+
+export PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_PATH}
+
+python -m playwright install chromium
+
+echo "Installed browsers:"
+
+find ${PLAYWRIGHT_PATH} -type f | head
 
 # ==========================================================
-# S3 LOG UPLOAD SCRIPT
+# LOG FILE
 # ==========================================================
-cat >/usr/local/bin/upload-bot-log.sh <<EOF
+sudo touch ${LOGFILE}
+
+sudo chown ${APP_USER}:${APP_USER} ${LOGFILE}
+
+sudo chmod 664 ${LOGFILE}
+
+# ==========================================================
+# S3 UPLOAD SCRIPT
+# ==========================================================
+sudo tee /usr/local/bin/upload-bot-log.sh > /dev/null <<EOF
 #!/bin/bash
 
 aws s3 cp \
@@ -122,12 +148,12 @@ ${S3_BUCKET}/${S3_PREFIX}/logs/${APP_NAME}.log \
 --region ${REGION} || true
 EOF
 
-chmod +x /usr/local/bin/upload-bot-log.sh
+sudo chmod +x /usr/local/bin/upload-bot-log.sh
 
 # ==========================================================
-# SYSTEMD TIMER
+# LOG UPLOAD SERVICE
 # ==========================================================
-cat >/etc/systemd/system/upload-bot-log.service <<EOF
+sudo tee /etc/systemd/system/upload-bot-log.service > /dev/null <<EOF
 [Unit]
 Description=Upload Bot Log
 
@@ -136,7 +162,7 @@ Type=oneshot
 ExecStart=/usr/local/bin/upload-bot-log.sh
 EOF
 
-cat >/etc/systemd/system/upload-bot-log.timer <<EOF
+sudo tee /etc/systemd/system/upload-bot-log.timer > /dev/null <<EOF
 [Unit]
 Description=Upload Bot Log Every 5 Minutes
 
@@ -152,9 +178,9 @@ EOF
 # ==========================================================
 # BOT SERVICE
 # ==========================================================
-cat >/etc/systemd/system/${APP_NAME}.service <<EOF
+sudo tee /etc/systemd/system/${APP_NAME}.service > /dev/null <<EOF
 [Unit]
-Description=Trading Bot
+Description=Marketsmith Trading Bot
 After=network-online.target
 
 [Service]
@@ -163,6 +189,7 @@ WorkingDirectory=${APP_HOME}/${REPO_NAME}
 
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=${APP_HOME}/${REPO_NAME}
+Environment=PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_PATH}
 
 ExecStart=${APP_HOME}/${REPO_NAME}/venv/bin/python main.py
 
@@ -179,15 +206,19 @@ WantedBy=multi-user.target
 EOF
 
 # ==========================================================
-# ENABLE SERVICES
+# START SERVICES
 # ==========================================================
-systemctl daemon-reload
+sudo systemctl daemon-reload
 
-systemctl enable upload-bot-log.timer
-systemctl start upload-bot-log.timer
+sudo systemctl enable upload-bot-log.timer
+sudo systemctl start upload-bot-log.timer
 
-systemctl enable ${APP_NAME}
-systemctl restart ${APP_NAME}
+sudo systemctl enable ${APP_NAME}
+sudo systemctl restart ${APP_NAME}
+
+sleep 5
+
+sudo systemctl status ${APP_NAME} --no-pager || true
 
 echo "======================================="
 echo "BOOTSTRAP COMPLETE"
