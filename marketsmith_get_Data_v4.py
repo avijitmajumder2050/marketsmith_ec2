@@ -277,6 +277,16 @@ def run():
     print(
         f"✅ Saved filtered setups ({len(filtered_df)} symbols)"
     )
+    # Save 2 (same file to uploads folder)
+    s3.put_object(
+        Bucket=BUCKET,
+        Key="uploads/mapping.csv",
+        Body=buffer.getvalue()
+    )
+
+    print(
+        "✅ Saved copy to uploads/mapping.csv"
+    )
 
     print("\n✅ COMPLETED")
     
