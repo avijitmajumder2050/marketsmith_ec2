@@ -5,11 +5,12 @@ import boto3
 import requests
 from io import BytesIO
 from playwright.sync_api import sync_playwright
+from aws_s3 import S3_BUCKET as ACTIVE_S3_BUCKET
 
 # ─────────────────────────────────────────────
 # CONFIG (t3.micro OPTIMIZED)
 # ─────────────────────────────────────────────
-BUCKET = "dhan-trading-data"
+BUCKET = ACTIVE_S3_BUCKET
 INPUT_KEY = "chartmaza-data/input/raw_mapping_all_symbols.csv"
 OUTPUT_KEY = "chartmaza-data/output/marketsmith_output.csv"
 

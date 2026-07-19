@@ -5,13 +5,16 @@ set -e
 # CONFIG
 # ==========================================================
 REGION="ap-south-1"
+
 APP_USER="ec2-user"
 APP_HOME="/home/ec2-user"
 
 GITHUB_REPO="https://github.com/avijitmajumder2050/marketsmith_ec2.git"
+REPO_NAME="marketsmith_ec2"
+
 APP_NAME="marketsmithindia-bot"
 
-S3_BUCKET="s3://dhan-trading-data"
+S3_BUCKET="dhan-trading-data"
 S3_PREFIX="trading-bot"
 
 LOGFILE="/var/log/${APP_NAME}.log"
@@ -22,122 +25,158 @@ PLAYWRIGHT_PATH="${APP_HOME}/playwright-browsers"
 exec > >(tee -a ${BOOTLOG}) 2>&1
 
 echo "======================================="
-echo "Starting EC2 Bootstrap"
+echo "BOOTSTRAP STARTED"
 echo "======================================="
 
 # ==========================================================
 # OS UPDATE
 # ==========================================================
-sudo yum update -y
-sudo timedatectl set-timezone Asia/Kolkata
+yum update -y
+
+timedatectl set-timezone Asia/Kolkata
 
 # ==========================================================
-# PACKAGES
+# INSTALL PACKAGES
 # ==========================================================
-sudo yum install -y python3 python3-pip git awscli
+yum install -y \
+python3 \
+python3-pip \
+git \
+awscli
+
+echo "Packages installed"
 
 # ==========================================================
 # PLAYWRIGHT DEPENDENCIES
 # ==========================================================
-sudo yum install -y \
-atk cups-libs gtk3 libXcomposite libXcursor libXdamage \
-libXext libXi libXrandr libXScrnSaver libXtst pango \
-alsa-lib libX11 libX11-xcb libxcb libXfixes libXrender \
-cairo gdk-pixbuf2 fontconfig freetype
+yum install -y \
+atk \
+cups-libs \
+gtk3 \
+libXcomposite \
+libXcursor \
+libXdamage \
+libXext \
+libXi \
+libXrandr \
+libXScrnSaver \
+libXtst \
+pango \
+alsa-lib \
+libX11 \
+libX11-xcb \
+libxcb \
+libXfixes \
+libXrender \
+cairo \
+gdk-pixbuf2 \
+fontconfig \
+freetype
 
 # ==========================================================
 # CLONE REPO
 # ==========================================================
 cd ${APP_HOME}
 
-REPO_NAME=$(basename ${GITHUB_REPO} .git)
-
-if [ ! -d "${REPO_NAME}" ]; then
-    git clone ${GITHUB_REPO}
+if [ -d "${REPO_NAME}" ]; then
+    rm -rf ${REPO_NAME}
 fi
 
-sudo chown -R ${APP_USER}:${APP_USER} ${REPO_NAME}
+git clone ${GITHUB_REPO}
+
+chown -R ${APP_USER}:${APP_USER} ${REPO_NAME}
 
 cd ${REPO_NAME}
 
 # ==========================================================
-# VENV
+# PYTHON VENV
 # ==========================================================
-if [ ! -d "venv" ]; then
-    python3 -m venv venv
-fi
+python3 -m venv venv
 
 source venv/bin/activate
 
-# ==========================================================
-# PYTHON DEPENDENCIES
-# ==========================================================
 pip install --upgrade pip setuptools wheel
 
+# ==========================================================
+# INSTALL LIBRARIES
+# ==========================================================
 pip install \
-playwright requests pandas boto3 beautifulsoup4
+playwright \
+requests \
+pandas \
+boto3 \
+beautifulsoup4
 
+# ==========================================================
+# REQUIREMENTS
+# ==========================================================
 if [ -f requirements.txt ]; then
     pip install -r requirements.txt
 fi
 
 # ==========================================================
-# PLAYWRIGHT BROWSER
+# PLAYWRIGHT INSTALL
 # ==========================================================
 mkdir -p ${PLAYWRIGHT_PATH}
+
 export PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_PATH}
 
 python -m playwright install chromium
 
-# ==========================================================
-# LOG FILE SETUP
-# ==========================================================
-sudo touch ${LOGFILE}
-sudo chown ${APP_USER}:${APP_USER} ${LOGFILE}
-sudo chmod 664 ${LOGFILE}
+echo "Playwright installation completed"
 
 # ==========================================================
-# S3 UPLOAD SCRIPT
+# LOG FILE
 # ==========================================================
-sudo tee /usr/local/bin/upload-bot-log.sh > /dev/null <<EOF
-#!/bin/bash
-aws s3 cp ${LOGFILE} ${S3_BUCKET}/${S3_PREFIX}/logs/${APP_NAME}.log --region ${REGION} || true
-EOF
-
-sudo chmod +x /usr/local/bin/upload-bot-log.sh
+touch ${LOGFILE}
+chmod 666 ${LOGFILE}
 
 # ==========================================================
-# RUN BOT (BLOCKING EXECUTION)
+# RUN BOT ONCE
 # ==========================================================
 echo "======================================="
-echo "Starting Trading Bot (foreground run)"
+echo "STARTING BOT"
 echo "======================================="
-
-export PYTHONUNBUFFERED=1
-export PYTHONPATH=${APP_HOME}/${REPO_NAME}
-export PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_PATH}
 
 cd ${APP_HOME}/${REPO_NAME}
 
-source venv/bin/activate
+export PYTHONPATH=${APP_HOME}/${REPO_NAME}
+export PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_PATH}
 
-python main.py >> ${LOGFILE} 2>&1
+set +e
+
+${APP_HOME}/${REPO_NAME}/venv/bin/python main.py \
+    >> ${LOGFILE} 2>&1
+
+BOT_EXIT_CODE=$?
+
+set -e
 
 echo "======================================="
-echo "BOT FINISHED EXECUTION"
+echo "BOT FINISHED"
+echo "EXIT CODE = ${BOT_EXIT_CODE}"
 echo "======================================="
 
 # ==========================================================
-# UPLOAD LOGS
+# UPLOAD LOGS TO S3
 # ==========================================================
-echo "Uploading logs to S3..."
-/usr/local/bin/upload-bot-log.sh || true
+echo "Uploading logs..."
+
+aws s3 cp \
+${LOGFILE} \
+s3://${S3_BUCKET}/${S3_PREFIX}/logs/${APP_NAME}.log \
+--region ${REGION} || true
+
+aws s3 cp \
+${BOOTLOG} \
+s3://${S3_BUCKET}/${S3_PREFIX}/logs/${APP_NAME}-bootstrap.log \
+--region ${REGION} || true
+
+echo "Logs uploaded"
 
 # ==========================================================
-# TERMINATE EC2 INSTANCE
+# WAIT FOR S3
 # ==========================================================
-echo "Preparing to terminate EC2..."
-
 sleep 30
 
 # ==========================================================
@@ -162,4 +201,3 @@ echo "Termination request submitted"
 echo "======================================="
 echo "BOOTSTRAP COMPLETE"
 echo "======================================="
-echo "Bootstrap completed fully"

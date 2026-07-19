@@ -9,6 +9,7 @@ APP_USER="ec2-user"
 APP_HOME="/home/ec2-user"
 
 GITHUB_REPO="https://github.com/avijitmajumder2050/marketsmith_ec2.git"
+
 APP_NAME="marketsmithindia-bot"
 
 S3_BUCKET="s3://dhan-trading-data"
@@ -29,21 +30,46 @@ echo "======================================="
 # OS UPDATE
 # ==========================================================
 sudo yum update -y
+
 sudo timedatectl set-timezone Asia/Kolkata
 
 # ==========================================================
-# PACKAGES
-# ==========================================================
-sudo yum install -y python3 python3-pip git awscli
-
-# ==========================================================
-# PLAYWRIGHT DEPENDENCIES
+# INSTALL PACKAGES
 # ==========================================================
 sudo yum install -y \
-atk cups-libs gtk3 libXcomposite libXcursor libXdamage \
-libXext libXi libXrandr libXScrnSaver libXtst pango \
-alsa-lib libX11 libX11-xcb libxcb libXfixes libXrender \
-cairo gdk-pixbuf2 fontconfig freetype
+python3 \
+python3-pip \
+git \
+awscli
+
+echo "Packages installed"
+
+# ==========================================================
+# PLAYWRIGHT LINUX DEPENDENCIES
+# ==========================================================
+sudo yum install -y \
+atk \
+cups-libs \
+gtk3 \
+libXcomposite \
+libXcursor \
+libXdamage \
+libXext \
+libXi \
+libXrandr \
+libXScrnSaver \
+libXtst \
+pango \
+alsa-lib \
+libX11 \
+libX11-xcb \
+libxcb \
+libXfixes \
+libXrender \
+cairo \
+gdk-pixbuf2 \
+fontconfig \
+freetype
 
 # ==========================================================
 # CLONE REPO
@@ -61,7 +87,7 @@ sudo chown -R ${APP_USER}:${APP_USER} ${REPO_NAME}
 cd ${REPO_NAME}
 
 # ==========================================================
-# VENV
+# PYTHON VENV
 # ==========================================================
 if [ ! -d "venv" ]; then
     python3 -m venv venv
@@ -70,30 +96,44 @@ fi
 source venv/bin/activate
 
 # ==========================================================
-# PYTHON DEPENDENCIES
+# INSTALL PYTHON PACKAGES
 # ==========================================================
-pip install --upgrade pip setuptools wheel
+pip install --upgrade setuptools wheel
 
 pip install \
-playwright requests pandas boto3 beautifulsoup4
+playwright \
+requests \
+pandas \
+boto3 \
+beautifulsoup4
 
+# ==========================================================
+# INSTALL REQUIREMENTS
+# ==========================================================
 if [ -f requirements.txt ]; then
     pip install -r requirements.txt
 fi
 
 # ==========================================================
-# PLAYWRIGHT BROWSER
+# INSTALL PLAYWRIGHT BROWSER
 # ==========================================================
 mkdir -p ${PLAYWRIGHT_PATH}
+
 export PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_PATH}
 
 python -m playwright install chromium
 
+echo "Installed browsers:"
+
+find ${PLAYWRIGHT_PATH} -type f | head
+
 # ==========================================================
-# LOG FILE SETUP
+# LOG FILE
 # ==========================================================
 sudo touch ${LOGFILE}
+
 sudo chown ${APP_USER}:${APP_USER} ${LOGFILE}
+
 sudo chmod 664 ${LOGFILE}
 
 # ==========================================================
@@ -101,65 +141,85 @@ sudo chmod 664 ${LOGFILE}
 # ==========================================================
 sudo tee /usr/local/bin/upload-bot-log.sh > /dev/null <<EOF
 #!/bin/bash
-aws s3 cp ${LOGFILE} ${S3_BUCKET}/${S3_PREFIX}/logs/${APP_NAME}.log --region ${REGION} || true
+
+aws s3 cp \
+${LOGFILE} \
+${S3_BUCKET}/${S3_PREFIX}/logs/${APP_NAME}.log \
+--region ${REGION} || true
 EOF
 
 sudo chmod +x /usr/local/bin/upload-bot-log.sh
 
 # ==========================================================
-# RUN BOT (BLOCKING EXECUTION)
+# LOG UPLOAD SERVICE
 # ==========================================================
-echo "======================================="
-echo "Starting Trading Bot (foreground run)"
-echo "======================================="
+sudo tee /etc/systemd/system/upload-bot-log.service > /dev/null <<EOF
+[Unit]
+Description=Upload Bot Log
 
-export PYTHONUNBUFFERED=1
-export PYTHONPATH=${APP_HOME}/${REPO_NAME}
-export PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_PATH}
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/upload-bot-log.sh
+EOF
 
-cd ${APP_HOME}/${REPO_NAME}
+sudo tee /etc/systemd/system/upload-bot-log.timer > /dev/null <<EOF
+[Unit]
+Description=Upload Bot Log Every 5 Minutes
 
-source venv/bin/activate
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
 
-python main.py >> ${LOGFILE} 2>&1
-
-echo "======================================="
-echo "BOT FINISHED EXECUTION"
-echo "======================================="
-
-# ==========================================================
-# UPLOAD LOGS
-# ==========================================================
-echo "Uploading logs to S3..."
-/usr/local/bin/upload-bot-log.sh || true
+[Install]
+WantedBy=timers.target
+EOF
 
 # ==========================================================
-# TERMINATE EC2 INSTANCE
+# BOT SERVICE
 # ==========================================================
-echo "Preparing to terminate EC2..."
+sudo tee /etc/systemd/system/${APP_NAME}.service > /dev/null <<EOF
+[Unit]
+Description=Marketsmith Trading Bot
+After=network-online.target
 
-sleep 30
+[Service]
+User=${APP_USER}
+WorkingDirectory=${APP_HOME}/${REPO_NAME}
+
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=${APP_HOME}/${REPO_NAME}
+Environment=PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_PATH}
+
+ExecStart=${APP_HOME}/${REPO_NAME}/venv/bin/python main.py
+
+Restart=always
+RestartSec=10
+
+StandardOutput=append:${LOGFILE}
+StandardError=append:${LOGFILE}
+
+ExecStopPost=/usr/local/bin/upload-bot-log.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 # ==========================================================
-# TERMINATE EC2
+# START SERVICES
 # ==========================================================
-TOKEN=$(curl -s -X PUT \
-"http://169.254.169.254/latest/api/token" \
--H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+sudo systemctl daemon-reload
 
-INSTANCE_ID=$(curl -s \
--H "X-aws-ec2-metadata-token: ${TOKEN}" \
-http://169.254.169.254/latest/meta-data/instance-id)
+sudo systemctl enable upload-bot-log.timer
+sudo systemctl start upload-bot-log.timer
 
-echo "Terminating instance ${INSTANCE_ID}"
+sudo systemctl enable ${APP_NAME}
+sudo systemctl restart ${APP_NAME}
 
-aws ec2 terminate-instances \
-    --instance-ids ${INSTANCE_ID} \
-    --region ${REGION}
+sleep 5
 
-echo "Termination request submitted"
+sudo systemctl status ${APP_NAME} --no-pager || true
 
 echo "======================================="
 echo "BOOTSTRAP COMPLETE"
 echo "======================================="
-echo "Bootstrap completed fully"
